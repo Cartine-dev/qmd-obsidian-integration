@@ -18,6 +18,7 @@ import * as sqliteVec from "sqlite-vec";
 import {
   LlamaCpp,
   getDefaultLlamaCpp,
+  getDefaultEmbeddingProvider,
   formatQueryForEmbedding,
   formatDocForEmbedding,
   type RerankDocument,
@@ -2019,7 +2020,7 @@ async function getEmbedding(text: string, model: string, isQuery: boolean, sessi
   const formattedText = isQuery ? formatQueryForEmbedding(text) : formatDocForEmbedding(text);
   const result = session
     ? await session.embed(formattedText, { model, isQuery })
-    : await getDefaultLlamaCpp().embed(formattedText, { model, isQuery });
+    : await getDefaultEmbeddingProvider().embed(formattedText, { model, isQuery });
   return result?.embedding || null;
 }
 

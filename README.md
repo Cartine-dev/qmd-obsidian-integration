@@ -247,6 +247,37 @@ QMD uses three local GGUF models (auto-downloaded on first use):
 
 Models are downloaded from HuggingFace and cached in `~/.cache/qmd/models/`.
 
+### External Embeddings (OpenAI-compatible)
+
+QMD supports using external embedding providers compatible with OpenAI's API (e.g., LiteLLM, Infinity, or OpenAI's API directly) instead of local GGUF models.
+
+**Configuration:** Set the following environment variables:
+
+```bash
+export QMD_EMBEDDINGS_PROVIDER=openai
+export QMD_OPENAI_BASE_URL=http://localhost:4000
+export QMD_OPENAI_API_KEY="your-api-key"
+export QMD_OPENAI_EMBEDDING_MODEL=default-embedding-model  # Optional, default: default-embedding-model
+```
+
+**Example with LiteLLM:**
+
+```bash
+# Start LiteLLM proxy locally (see your LiteLLM docs)
+# Then configure QMD:
+export QMD_EMBEDDINGS_PROVIDER=openai
+export QMD_OPENAI_BASE_URL=http://localhost:4000
+export QMD_OPENAI_API_KEY="$(secret-tool lookup service openclaw vendor litellm key LITELLM_MASTER_KEY)"
+export QMD_OPENAI_EMBEDDING_MODEL=default-embedding-model
+
+# Generate embeddings using LiteLLM:
+qmd embed
+```
+
+**Fallback behavior:** If `QMD_EMBEDDINGS_PROVIDER=openai` is set but required environment variables are missing, QMD will log an error and fall back to local embeddings.
+
+**Note:** Reranking and query expansion still use local models regardless of the embedding provider setting.
+
 ## Installation
 
 ```sh

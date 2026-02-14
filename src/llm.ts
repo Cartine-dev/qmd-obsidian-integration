@@ -132,6 +132,14 @@ export type LLMSessionOptions = {
 };
 
 /**
+ * Embedding provider interface - abstracts embedding source (local or external)
+ */
+export interface IEmbeddingProvider {
+  embed(text: string, options?: EmbedOptions): Promise<EmbeddingResult | null>;
+  embedBatch(texts: string[]): Promise<(EmbeddingResult | null)[]>;
+}
+
+/**
  * Session interface for scoped LLM access with lifecycle guarantees
  */
 export interface ILLMSession {
@@ -237,8 +245,8 @@ export async function pullModels(
     const entries = readdirSync(cacheDir, { withFileTypes: true });
     const cached = filename
       ? entries
-          .filter((entry) => entry.isFile() && entry.name.includes(filename))
-          .map((entry) => join(cacheDir, entry.name))
+        .filter((entry) => entry.isFile() && entry.name.includes(filename))
+        .map((entry) => join(cacheDir, entry.name))
       : [];
 
     if (hfRef && filename) {
@@ -1099,11 +1107,15 @@ class LLMSession implements ILLMSession {
   }
 
   async embed(text: string, options?: EmbedOptions): Promise<EmbeddingResult | null> {
-    return this.withOperation(() => this.manager.getLlamaCpp().embed(text, options));
+    // Use embedding provider factory for embed operations
+    const provider = getDefaultEmbeddingProvider();
+    return this.withOperation(() => provider.embed(text, options));
   }
 
   async embedBatch(texts: string[]): Promise<(EmbeddingResult | null)[]> {
-    return this.withOperation(() => this.manager.getLlamaCpp().embedBatch(texts));
+    // Use embedding provider factory for batch embed operations
+    const provider = getDefaultEmbeddingProvider();
+    return this.withOperation(() => provider.embedBatch(texts));
   }
 
   async expandQuery(
@@ -1206,3 +1218,53 @@ export async function disposeDefaultLlamaCpp(): Promise<void> {
     defaultLlamaCpp = null;
   }
 }
+
+// =============================================================================
+// Embedding Provider Factory
+// =============================================================================
+
+import { OpenAICompatibleEmbeddings, loadOpenAIConfig } from "./embeddings/openai_compatible";
+
+let defaultEmbeddingProvider: IEmbeddingProvider | null = null;
+
+/**
+ * Get the default embedding provider based on environment configuration.
+ * Checks QMD_EMBEDDINGS_PROVIDER env var:
+ * - "openai": Use OpenAI-compatible external API
+ * - "local" or undefined: Use local LlamaCpp (default)
+ */
+export function getDefaultEmbeddingProvider(): IEmbeddingProvider {
+  if (defaultEmbeddingProvider) {
+    return defaultEmbeddingProvider;
+  }
+
+  const providerType = Bun.env.QMD_EMBEDDINGS_PROVIDER || "local";
+
+  if (providerType === "openai") {
+    const config = loadOpenAIConfig();
+    if (!config) {
+      console.error(
+        "QMD_EMBEDDINGS_PROVIDER=openai but missing required env vars:\n" +
+        "  QMD_OPENAI_BASE_URL\n" +
+        "  QMD_OPENAI_API_KEY\n" +
+        "Falling back to local embeddings."
+      );
+      defaultEmbeddingProvider = getDefaultLlamaCpp();
+      return defaultEmbeddingProvider;
+    }
+    defaultEmbeddingProvider = new OpenAICompatibleEmbeddings(config);
+    return defaultEmbeddingProvider;
+  }
+
+  // Default: local LlamaCpp
+  defaultEmbeddingProvider = getDefaultLlamaCpp();
+  return defaultEmbeddingProvider;
+}
+
+/**
+ * Reset the embedding provider (useful for testing or config changes)
+ */
+export function resetEmbeddingProvider(): void {
+  defaultEmbeddingProvider = null;
+}
+
