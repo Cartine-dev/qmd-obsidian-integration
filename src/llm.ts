@@ -1239,6 +1239,7 @@ export function getDefaultEmbeddingProvider(): IEmbeddingProvider {
   }
 
   const providerType = Bun.env.QMD_EMBEDDINGS_PROVIDER || "local";
+  console.error(`[DEBUG] Initializing embedding provider: ${providerType}`);
 
   if (providerType === "openai") {
     const config = loadOpenAIConfig();
@@ -1252,11 +1253,13 @@ export function getDefaultEmbeddingProvider(): IEmbeddingProvider {
       defaultEmbeddingProvider = getDefaultLlamaCpp();
       return defaultEmbeddingProvider;
     }
+    console.error(`[DEBUG] Using OpenAI-compatible provider: ${config.baseUrl}`);
     defaultEmbeddingProvider = new OpenAICompatibleEmbeddings(config);
     return defaultEmbeddingProvider;
   }
 
   // Default: local LlamaCpp
+  console.error(`[DEBUG] Using local LlamaCpp provider`);
   defaultEmbeddingProvider = getDefaultLlamaCpp();
   return defaultEmbeddingProvider;
 }

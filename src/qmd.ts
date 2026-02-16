@@ -65,7 +65,7 @@ import {
   createStore,
   getDefaultDbPath,
 } from "./store.js";
-import { disposeDefaultLlamaCpp, withLLMSession, pullModels, DEFAULT_EMBED_MODEL_URI, DEFAULT_GENERATE_MODEL_URI, DEFAULT_RERANK_MODEL_URI, DEFAULT_MODEL_CACHE_DIR } from "./llm.js";
+import { disposeDefaultLlamaCpp, withLLMSession, pullModels, resetEmbeddingProvider, DEFAULT_EMBED_MODEL_URI, DEFAULT_GENERATE_MODEL_URI, DEFAULT_RERANK_MODEL_URI, DEFAULT_MODEL_CACHE_DIR } from "./llm.js";
 import {
   formatSearchResults,
   formatDocuments,
@@ -1551,6 +1551,12 @@ async function vectorIndex(model: string = DEFAULT_EMBED_MODEL, force: boolean =
 
   // Hide cursor during embedding
   cursor.hide();
+
+  // CRITICAL: Reset embedding provider to ensure env vars are read fresh
+  // This is necessary because chunkDocumentByTokens() above may have initialized
+  // the LlamaCpp provider for tokenization, which caches the provider before
+  // we get a chance to use the OpenAI-compatible provider.
+  resetEmbeddingProvider();
 
   // Wrap all LLM embedding operations in a session for lifecycle management
   // Use 30 minute timeout for large collections
