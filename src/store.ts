@@ -98,7 +98,7 @@ export function homedir(): string {
  */
 export function isAbsolutePath(path: string): boolean {
   if (!path) return false;
-  
+
   // Unix absolute path
   if (path.startsWith('/')) {
     // Check if it's a Git Bash style path like /c/ or /c/Users (C-Z only, not A or B)
@@ -112,12 +112,12 @@ export function isAbsolutePath(path: string): boolean {
     // Any other path starting with / is Unix absolute
     return true;
   }
-  
+
   // Windows native path: C:\ or C:/ (any letter A-Z)
   if (path.length >= 2 && /[a-zA-Z]/.test(path[0]!) && path[1] === ':') {
     return true;
   }
-  
+
   return false;
 }
 
@@ -139,25 +139,25 @@ export function getRelativePathFromPrefix(path: string, prefix: string): string 
   if (!prefix) {
     return null;
   }
-  
+
   const normalizedPath = normalizePathSeparators(path);
   const normalizedPrefix = normalizePathSeparators(prefix);
-  
+
   // Ensure prefix ends with / for proper matching
-  const prefixWithSlash = !normalizedPrefix.endsWith('/') 
-    ? normalizedPrefix + '/' 
+  const prefixWithSlash = !normalizedPrefix.endsWith('/')
+    ? normalizedPrefix + '/'
     : normalizedPrefix;
-  
+
   // Exact match
   if (normalizedPath === normalizedPrefix) {
     return '';
   }
-  
+
   // Check if path starts with prefix
   if (normalizedPath.startsWith(prefixWithSlash)) {
     return normalizedPath.slice(prefixWithSlash.length);
   }
-  
+
   return null;
 }
 
@@ -165,18 +165,18 @@ export function resolve(...paths: string[]): string {
   if (paths.length === 0) {
     throw new Error("resolve: at least one path segment is required");
   }
-  
+
   // Normalize all paths to use forward slashes
   const normalizedPaths = paths.map(normalizePathSeparators);
-  
+
   let result = '';
   let windowsDrive = '';
-  
+
   // Check if first path is absolute
   const firstPath = normalizedPaths[0]!;
   if (isAbsolutePath(firstPath)) {
     result = firstPath;
-    
+
     // Extract Windows drive letter if present
     if (firstPath.length >= 2 && /[a-zA-Z]/.test(firstPath[0]!) && firstPath[1] === ':') {
       windowsDrive = firstPath.slice(0, 2);
@@ -192,7 +192,7 @@ export function resolve(...paths: string[]): string {
   } else {
     // Start with PWD or cwd, then append the first relative path
     const pwd = normalizePathSeparators(Bun.env.PWD || process.cwd());
-    
+
     // Extract Windows drive from PWD if present
     if (pwd.length >= 2 && /[a-zA-Z]/.test(pwd[0]!) && pwd[1] === ':') {
       windowsDrive = pwd.slice(0, 2);
@@ -201,14 +201,14 @@ export function resolve(...paths: string[]): string {
       result = pwd + '/' + firstPath;
     }
   }
-  
+
   // Process remaining paths
   for (let i = 1; i < normalizedPaths.length; i++) {
     const p = normalizedPaths[i]!;
     if (isAbsolutePath(p)) {
       // Absolute path replaces everything
       result = p;
-      
+
       // Update Windows drive if present
       if (p.length >= 2 && /[a-zA-Z]/.test(p[0]!) && p[1] === ':') {
         windowsDrive = p.slice(0, 2);
@@ -230,7 +230,7 @@ export function resolve(...paths: string[]): string {
       result = result + '/' + p;
     }
   }
-  
+
   // Normalize . and .. components
   const parts = result.split('/').filter(Boolean);
   const normalized: string[] = [];
@@ -241,15 +241,15 @@ export function resolve(...paths: string[]): string {
       normalized.push(part);
     }
   }
-  
+
   // Build final path
   const finalPath = '/' + normalized.join('/');
-  
+
   // Prepend Windows drive if present
   if (windowsDrive) {
     return windowsDrive + finalPath;
   }
-  
+
   return finalPath;
 }
 
@@ -1271,6 +1271,20 @@ export async function chunkDocumentByTokens(
   maxTokens: number = CHUNK_SIZE_TOKENS,
   overlapTokens: number = CHUNK_OVERLAP_TOKENS
 ): Promise<{ text: string; pos: number; tokens: number }[]> {
+  // PATCH: If using OpenAI/LiteLLM, use simple character chunking to avoid downloading local models
+  if (Bun.env.QMD_EMBEDDINGS_PROVIDER === "openai") {
+    // Approx 4 chars per token
+    const maxChars = maxTokens * 4;
+    const overlapChars = overlapTokens * 4;
+    const simpleChunks = chunkDocument(content, maxChars, overlapChars);
+
+    return simpleChunks.map(chunk => ({
+      text: chunk.text,
+      pos: chunk.pos,
+      tokens: Math.ceil(chunk.text.length / 4) // Approx token count
+    }));
+  }
+
   const llm = getDefaultLlamaCpp();
 
   // Tokenize once upfront
@@ -1372,7 +1386,7 @@ export function normalizeDocid(docid: string): string {
 
   // Strip surrounding quotes (single or double)
   if ((normalized.startsWith('"') && normalized.endsWith('"')) ||
-      (normalized.startsWith("'") && normalized.endsWith("'"))) {
+    (normalized.startsWith("'") && normalized.endsWith("'"))) {
     normalized = normalized.slice(1, -1);
   }
 
@@ -2086,6 +2100,15 @@ export async function expandQuery(query: string, model: string = DEFAULT_QUERY_M
   }
 
   const llm = getDefaultLlamaCpp();
+
+  // PATCH: If using OpenAI/LiteLLM, avoid local model expansion
+  if (Bun.env.QMD_EMBEDDINGS_PROVIDER === "openai") {
+    return [
+      { type: 'vec', text: query },
+      { type: 'lex', text: query }
+    ];
+  }
+
   // Note: LlamaCpp uses hardcoded model, model parameter is ignored
   const results = await llm.expandQuery(query);
 
@@ -2123,7 +2146,10 @@ export async function rerank(query: string, documents: { file: string; text: str
     }
   }
 
-  // Rerank uncached documents using LlamaCpp
+  // Rerank uncached documents using LlamaCpp local model.
+  // Note: QMD_EMBEDDINGS_PROVIDER=openai only changes the embedding provider;
+  // reranking always uses the local GGUF model (qwen3-reranker-0.6b-q8_0).
+  // The model is already downloaded to the agent XDG cache — no new download.
   if (uncachedDocs.length > 0) {
     const llm = getDefaultLlamaCpp();
     const rerankResult = await llm.rerank(query, uncachedDocs, { model });

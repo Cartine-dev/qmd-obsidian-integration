@@ -1122,6 +1122,13 @@ class LLMSession implements ILLMSession {
     query: string,
     options?: { context?: string; includeLexical?: boolean }
   ): Promise<Queryable[]> {
+    // PATCH: If using OpenAI/LiteLLM, skip HyDE expansion to avoid downloading local models.
+    if (Bun.env.QMD_EMBEDDINGS_PROVIDER === "openai") {
+      return [
+        { type: 'vec', text: query },
+        { type: 'lex', text: query }
+      ];
+    }
     return this.withOperation(() => this.manager.getLlamaCpp().expandQuery(query, options));
   }
 
@@ -1130,6 +1137,17 @@ class LLMSession implements ILLMSession {
     documents: RerankDocument[],
     options?: RerankOptions
   ): Promise<RerankResult> {
+    // PATCH: If using OpenAI/LiteLLM, skip reranking to avoid downloading local models.
+    if (Bun.env.QMD_EMBEDDINGS_PROVIDER === "openai") {
+      return {
+        model: "openai-skip-rerank",
+        results: documents.map((doc, index) => ({
+          file: doc.file,
+          score: 0.99 - (index * 0.01), // Simple decay to preserve input order
+          index: index
+        }))
+      };
+    }
     return this.withOperation(() => this.manager.getLlamaCpp().rerank(query, documents, options));
   }
 }

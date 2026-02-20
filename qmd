@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 # qmd - Quick Markdown Search
 set -euo pipefail
 
