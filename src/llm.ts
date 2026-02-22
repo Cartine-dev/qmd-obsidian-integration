@@ -499,7 +499,10 @@ export class LlamaCpp implements LLM {
    */
   private async ensureLlama(): Promise<Llama> {
     if (!this.llama) {
-      this.llama = await getLlama({ logLevel: LlamaLogLevel.error });
+      this.llama = await getLlama({
+        gpu: process.env.QMD_RERANK_GPU === 'false' ? false : 'auto',
+        logLevel: LlamaLogLevel.error
+      });
     }
     return this.llama;
   }
@@ -617,7 +620,11 @@ export class LlamaCpp implements LLM {
     this.rerankModelLoadPromise = (async () => {
       const llama = await this.ensureLlama();
       const modelPath = await this.resolveModel(this.rerankModelUri);
-      const model = await llama.loadModel({ modelPath });
+      const gpuLayersRaw = process.env.QMD_RERANK_GPU_LAYERS;
+      const model = await llama.loadModel({
+        modelPath,
+        gpuLayers: gpuLayersRaw !== undefined ? parseInt(gpuLayersRaw) : "auto"
+      });
       this.rerankModel = model;
       // Model loading counts as activity - ping to keep alive
       this.touchActivity();
@@ -637,7 +644,12 @@ export class LlamaCpp implements LLM {
   private async ensureRerankContext(): Promise<Awaited<ReturnType<LlamaModel["createRankingContext"]>>> {
     if (!this.rerankContext) {
       const model = await this.ensureRerankModel();
-      this.rerankContext = await model.createRankingContext();
+      const ctxSizeRaw = process.env.QMD_RERANK_CONTEXT_SIZE;
+      this.rerankContext = await model.createRankingContext({
+        contextSize: ctxSizeRaw !== undefined ? parseInt(ctxSizeRaw) : 1024,
+        batchSize: 32,
+        threads: 0
+      });
     }
     this.touchActivity();
     return this.rerankContext;
@@ -898,8 +910,19 @@ export class LlamaCpp implements LLM {
     // Extract just the text for ranking
     const texts = documents.map((doc) => doc.text);
 
-    // Use the proper ranking API - returns [{document: string, score: number}] sorted by score
-    const ranked = await context.rankAndSort(query, texts);
+    // Process in batches of 5 docs to avoid Bun/Vulkan segfaults on GPUs with limited VRAM.
+    // Each batch is a fresh rankAndSort call so the driver gets breathing room.
+    const BATCH = 5;
+    const allRanked: { document: string; score: number }[] = [];
+    for (let i = 0; i < texts.length; i += BATCH) {
+      const batch = texts.slice(i, i + BATCH);
+      const batchResult = await context.rankAndSort(query, batch);
+      allRanked.push(...batchResult);
+      this.touchActivity();
+    }
+
+    // Re-sort the combined multi-batch results
+    const ranked = allRanked.sort((a, b) => b.score - a.score);
 
     // Map back to our result format using the text-to-doc map
     const results: RerankDocumentResult[] = ranked.map((item) => {
