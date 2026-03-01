@@ -1107,6 +1107,9 @@ export function insertContent(db: Database, hash: string, content: string, creat
 
 /**
  * Insert a new document into the documents table.
+ * Uses UPSERT so that if (collection, path) already exists (e.g. due to a
+ * race condition or a "new vs updated" mis-routing in the indexing pipeline),
+ * the row is updated in place instead of throwing SQLITE_CONSTRAINT_UNIQUE.
  */
 export function insertDocument(
   db: Database,
@@ -1120,6 +1123,11 @@ export function insertDocument(
   db.prepare(`
     INSERT INTO documents (collection, path, title, hash, created_at, modified_at, active)
     VALUES (?, ?, ?, ?, ?, ?, 1)
+    ON CONFLICT(collection, path) DO UPDATE SET
+      title       = excluded.title,
+      hash        = excluded.hash,
+      modified_at = excluded.modified_at,
+      active      = 1
   `).run(collectionName, path, title, hash, createdAt, modifiedAt);
 }
 
